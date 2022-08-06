@@ -1,10 +1,15 @@
 from __future__ import print_function
 from six.moves import input
 
+from difflib import get_close_matches
 import string
 import sys
 
-from langdetect import detect_langs
+from english_words import english_words_lower_alpha_set
+
+# See check_is_encrypted function below for explanation of these constants
+WORD_SIMILARITY_CUTOFF = 0.7
+SENTENCE_IS_ENGLISH_CONFIDENCE_CUTOFF = 0.9
 
 
 def caesar_crack_attempt(offset, enctext):
@@ -25,7 +30,9 @@ def decrypt_encrypted_text(enctext):
         dectext = caesar_crack_attempt(offset, enctext)
         attempts.append(dectext)
         if not check_if_text_is_encrypted(dectext):
-            return dectext
+            print("Decrypted! Here:\n\n")
+            print(dectext)
+            sys.exit(0)
     print('Tried all shifts from -25 to 25 but failed to decrypt text! Here are the attempts:')
     count = 0
     for a in attempts:
@@ -35,25 +42,29 @@ def decrypt_encrypted_text(enctext):
 
 
 def check_if_text_is_encrypted(text):
-    confidence_threshold = 0.95
+    filtered_text = ''
+    # remove everything that's not a letter or a space after lowercasing
+    for char in text.lower():
+        if char in string.ascii_lowercase + ' ':
+            filtered_text += char
 
-    guesses = detect_langs(text)
-    probabilities = {}
-    for g in guesses:
-        probabilities[g.prob] = g.lang
+    words = filtered_text.split(' ')
+    confidence = 0.0
+    for word in words:
+        # Using Python's standard builtin difflib library to check if a word is an English word.
+        # Some encrypted examples are missing letters, like "Wh_ is it eas_ to hack ..."
+        # "eas_" isn't a 100% match to "easy", but it is a 75% match. So we set similarity cutoff to 70%.
+        # This is arbitrary - the default is 60% for example. We want good enough but accurate for most
+        # sentences.
+        if get_close_matches(word, english_words_lower_alpha_set, 1, WORD_SIMILARITY_CUTOFF):
+            # Confidence based on length e.g. for a single-word sentence, if the word is English, then we have
+            # 100% confidence the sentence is English. If one word in a 4-word sentence is English, then we
+            # only have 25% confidence the sentence is English. If two words in a 10-word sentence are English,
+            # then we have 20% confidence the sentence as a whole is English, and so on.
+            confidence += 1.0 / len(words)
 
-    confident_guess = None
-    confidence_of_top_guess = max(probabilities.keys())
-    if confidence_of_top_guess > confidence_threshold:
-        confident_guess = probabilities[confidence_of_top_guess]
-
-    if confident_guess:
-        if confident_guess != 'en':
-            return True  # yep still encrypted
-        else:
-            return False  # it has been decrypted
-    else:
-        return True  # no guess was confident enough, assume it's still encrypted
+    # still considered encrypted unless we're 90+% sure it's English
+    return True if confidence < SENTENCE_IS_ENGLISH_CONFIDENCE_CUTOFF else False
 
 
 def main(argv):
@@ -62,9 +73,6 @@ def main(argv):
         print('Wrong number of arguments: {} instead of 1. Usage: python brute.py "The text you want to decrypt"'.format(len(args)))
         sys.exit(1)
 
-    from langdetect import DetectorFactory
-    DetectorFactory.seed = 0
-
     if not check_if_text_is_encrypted(args[0]):
         print('Warning: your text appears to already be decrypted. This program thinks it\'s regular English already.')
         c = input('Do you wish to continue? [y or Y for yes, any other text for No, assuming yes]:')
@@ -72,7 +80,7 @@ def main(argv):
             print('OK, you have chosen not to continue. Exiting.')
             sys.exit(2)
 
-    print(decrypt_encrypted_text(args[0]))
+    decrypt_encrypted_text(args[0])
 
 
 if __name__ == "__main__":
